@@ -1,0 +1,128 @@
+#!/bin/bash
+
+# --- SBATCH Directives (from your instructor) ---
+#SBATCH --chdir=.
+#SBATCH --cpus-per-task=10
+#SBATCH --error='%x-%A.txt'
+#SBATCH --output='%x-%A.txt'
+#SBATCH --job-name=BME610_N
+#SBATCH --mem=20G
+#SBATCH --export=ALL
+
+# --- Pipeline Configuration ---
+
+# This makes the script stop if any command fails
+set -e
+set -o pipefail
+
+# --- Define Variables (Makes it easier to manage paths) ---
+
+# Tools
+# Using the full paths from your original script
+BWA="/Bio/Share/Tools/bwa-0.7.18/bwa"
+SAMTOOLS="/Bio/Share/Tools/samtools-1.21/samtools"
+
+# !! IMPORTANT !! You MUST find the correct path to the GATK executable.
+# It's probably in /Bio/Share/Tools/ alongside the others.
+# I'm guessing the path here; you must verify it on your server.
+GATK="/Bio/Share/Tools/gatk-4.2.0.0/gatk" # <-- VERIFY THIS PATH
+
+# Reference Files
+REF="/Bio/Share/Tools/gatk-bundle/Hg38/Homo_sapiens_assembly38.fasta"
+
+# !! IMPORTANT !! BQSR needs a file of known variant sites (like dbSNP).
+# It's probably in the same gatk-bundle directory.
+# I'm guessing the path here; you must verify it.
+KNOWN_SITES="/Bio/Share/Tools/gatk-bundle/Hg38/dbsnp_146.hg38.vcf.gz" # <-- VERIFY THIS PATH
+
+# Input Files
+R1="/Bio/Teach/BME42401/Data/12N_R1.fastq.gz"
+R2="/Bio/Teach/BME42401/Data/12N_R2.fastq.gz"
+RG_STRING="@RG\tID:12N\tPL:ILLUMINA\tLB:12N\tSM:12N\tCN:UNIST"
+
+# Output Files
+PREFIX="12N"
+RAW_BAM="${PREFIX}.bam"
+SORT_BAM="${PREFIX}.Sort.bam"
+DEDUP_BAM="${PREFIX}.Sort.MarkDuplicates.bam"
+DEDUP_METRICS="${PREFIX}.Sort.MarkDuplicates.metrics"
+BQSR_TABLE="${PREFIX}.Sort.MarkDuplicates.BQSR.table"
+FINAL_BAM="${PREFIX}.Sort.MarkDuplicates.BQSR.bam"
+
+# Resources
+THREADS="10"
+MEMORY="18G" # Slightly less than --mem to be safe
+TEMP_DIR="./temp_${PREFIX}"
+mkdir -p $TEMP_DIR
+
+# --- GATK Pre-processing Pipeline ---
+
+echo "--- [Step 1] Alignment (BWA) and BAM Conversion (samtools) ---"
+# This is your instructor's command, modified to use variables
+# Creates ${PREFIX}.bam
+$BWA mem -t $THREADS -R "$RG_STRING" -v 3 $REF $R1 $R2 | \
+$SAMTOOLS view --bam --with-header --threads $THREADS --reference $REF --output $RAW_BAM -
+echo "--- Created $RAW_BAM ---"
+
+
+echo "--- [Step 2] Sort BAM (samtools) ---"
+# Creates ${PREFIX}.Sort.bam
+$SAMTOOLS sort -@ $THREADS -o $SORT_BAM $RAW_BAM
+echo "--- Created $SORT_BAM ---"
+
+
+echo "--- [Step 3] Index Sorted BAM (samtools) ---"
+# Creates ${PREFIX}.Sort.bam.bai (or .csi)
+$SAMTOOLS index $SORT_BAM
+echo "--- Created index for $SORT_BAM ---"
+
+
+echo "--- [Step 4] Mark Duplicates (GATK) ---"
+# Creates ${PREFIX}.Sort.MarkDuplicates.bam and .metrics
+$GATK --java-options "-Xmx$MEMORY" MarkDuplicates \
+    -I $SORT_BAM \
+    -O $DEDUP_BAM \
+    -M $DEDUP_METRICS \
+    --TMP_DIR $TEMP_DIR
+echo "--- Created $DEDUP_BAM and $DEDUP_METRICS ---"
+
+
+echo "--- [Step 5] Index MarkDuplicates BAM (samtools) ---"
+# Creates ${PREFIX}.Sort.MarkDuplicates.bam.bai
+$SAMTOOLS index $DEDUP_BAM
+echo "--- Created index for $DEDUP_BAM ---"
+
+
+echo "--- [Step 6] Base Recalibrator (GATK) ---"
+# Creates ${PREFIX}.Sort.MarkDuplicates.BQSR.table
+$GATK --java-options "-Xmx$MEMORY" BaseRecalibrator \
+    -R $REF \
+    -I $DEDUP_BAM \
+    --known-sites $KNOWN_SITES \
+    -O $BQSR_TABLE
+echo "--- Created $BQSR_TABLE ---"
+
+
+echo "--- [Step 7] Apply BQSR (GATK) ---"
+# Creates ${PREFIX}.Sort.MarkDuplicates.BQSR.bam
+$GATK --java-options "-Xmx$MEMORY" ApplyBQSR \
+    -R $REF \
+    -I $DEDUP_BAM \
+    -bqsr $BQSR_TABLE \
+    -O $FINAL_BAM
+echo "--- Created $FINAL_BAM ---"
+
+
+echo "--- [Step 8] Index Final BAM (samtools) ---"
+# Creates ${PREFIX}.Sort.MarkDuplicates.BQSR.bai
+$SAMTOOLS index $FINAL_BAM
+echo "--- Created index for $FINAL_BAM ---"
+
+
+echo "--- Cleaning up temporary files ---"
+# This pipeline creates intermediate files. 
+# We can remove the ones we don't need for the *next* step (variant calling)
+rm $RAW_BAM
+rm $SORT_BAM
+rm -rf $TEMP_DIR
+echo "--- ${PREFIX} pipeline is complete! Final output: $FINAL_BAM ---"
