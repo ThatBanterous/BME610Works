@@ -22,7 +22,7 @@ class PipelineManager(PipelineManagerBase):
 
     def run_mutect(self, dependency_id=None):
         input_tumor = f"--input {self.tumor} --normal-sample {self.normal_name} "
-        command = f"{self.config['TOOLS']['gatk']} Mutect2 --java-options \"{self.config['DEFAULT']['java_options']}\" --reference {self.config['REFERENCES']['fasta']} --input {self.normal} {input_tumor} --output {self.output_dir}/{self.name}.vcf --native-pair-hmm-threads {self.config['DEFAULT']['threads']} --max-mnp-distance 0
+        command = f"{self.config['TOOLS']['gatk']} Mutect2 --java-options \"{self.config['DEFAULT']['java_options']}\" --reference {self.config['REFERENCES']['fasta']} --input {self.normal} {input_tumor} --output {self.output_dir}/{self.name}.vcf --native-pair-hmm-threads {self.config['DEFAULT']['threads']} --max-mnp-distance 0"
         self.create_sh("1.Mutect", command)
         return self.submit_job("1.Mutect", dependency_id=dependency_id)
 
