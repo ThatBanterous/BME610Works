@@ -1,2 +1,2 @@
 #!/bin/bash
-SigProfilerMatrixGenerator matrix_generator --exome 'PS-826' 'GRCh38' "$(realpath .)"
+SigProfilerMatrixGenerator matrix_generator --exome '12' 'GRCh38' "$(realpath .)"
